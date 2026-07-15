@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#F9BAD1">
+  <title>Ví Lịch — Nhật ký chi tiêu</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Ví Lịch">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 3v3M18 3v3M4 9h16M5.5 5h13A1.5 1.5 0 0 1 20 6.5v12a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-12A1.5 1.5 0 0 1 5.5 5Z"/><path d="M8 13h3v3H8z"/></svg>
+        </span>
+        <span><strong>Ví Lịch</strong><small>Nhật ký chi tiêu</small></span>
+      </a>
+
+      <div class="month-nav">
+        <button class="btn btn-ghost today-button" type="button">Hôm nay</button>
+        <div class="nav-arrows">
+          <button class="icon-button previous-month" type="button" aria-label="Tháng trước">
+            <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <button class="icon-button next-month" type="button" aria-label="Tháng sau">
+            <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <h1 id="month-title">Tháng</h1>
+      </div>
+
+      <button class="btn btn-primary summary-button" type="button">
+        <svg viewBox="0 0 24 24"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg>
+        <span>Tổng</span>
+      </button>
+    </header>
+
+    <main class="workspace">
+      <section class="calendar-card" aria-label="Lịch chi tiêu">
+        <div class="weekdays" aria-hidden="true">
+          <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
+        <div id="calendar-loading" class="calendar-loading hidden">
+          <span class="spinner"></span> Đang tải dữ liệu...
+        </div>
+      </section>
+
+      <aside id="day-panel" class="day-panel">
+        <div class="panel-header">
+          <div>
+            <p id="selected-weekday" class="eyebrow">Hôm nay</p>
+            <h2 id="selected-date">Ngày</h2>
+          </div>
+          <button class="icon-button close-panel" type="button" aria-label="Đóng">
+            <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+
+        <div class="day-total-card">
+          <span>Đã chi trong ngày</span>
+          <strong id="day-total">0 ₫</strong>
+          <small id="day-count">Chưa có khoản chi</small>
+        </div>
+
+        <form id="expense-form" class="expense-form">
+          <div class="form-title-row">
+            <h3 id="form-title">Thêm khoản chi</h3>
+            <button id="cancel-edit" class="text-button hidden" type="button">Hủy sửa</button>
+          </div>
+          <label>
+            <span>Nội dung</span>
+            <input id="description" name="description" type="text" maxlength="255" placeholder="Ví dụ: Ăn trưa cùng bạn" required autocomplete="off">
+          </label>
+          <div class="form-row">
+            <label class="amount-field">
+              <span>Số tiền</span>
+              <div class="input-with-suffix">
+                <input id="amount" name="amount" type="text" inputmode="numeric" placeholder="50.000" required autocomplete="off">
+                <b>₫</b>
+              </div>
+            </label>
+            <label>
+              <span class="label-heading">Danh mục <button id="manage-categories" class="text-button" type="button">Quản lý</button></span>
+              <select id="category" name="category" required></select>
+            </label>
+          </div>
+          <button id="submit-expense" class="btn btn-primary submit-button" type="submit">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Lưu khoản chi</span>
+          </button>
+        </form>
+
+        <div class="expense-section">
+          <div class="section-heading">
+            <h3>Các khoản chi</h3>
+            <span id="expense-count-badge">0</span>
+          </div>
+          <div id="expense-list" class="expense-list"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="panel-backdrop" class="backdrop hidden"></div>
+
+  <dialog id="summary-dialog" class="summary-dialog">
+    <button class="icon-button dialog-close" type="button" aria-label="Đóng">
+      <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+    </button>
+    <p class="eyebrow">TỔNG KẾT CHI TIÊU</p>
+    <h2 id="summary-month">Tháng này</h2>
+    <div class="summary-tabs" role="tablist" aria-label="Khoảng thời gian">
+      <button type="button" data-summary-mode="week" role="tab">Theo tuần</button>
+      <button class="active" type="button" data-summary-mode="month" role="tab">Theo tháng</button>
+    </div>
+    <div class="summary-hero">
+      <span id="summary-total-label">Tổng đã chi trong tháng</span>
+      <strong id="month-total">0 ₫</strong>
+      <small id="month-count">0 khoản chi</small>
+    </div>
+    <div class="summary-grid">
+      <div><span>Ngày đang chọn</span><strong id="summary-day-total">0 ₫</strong></div>
+      <div><span>Ngày chi nhiều nhất</span><strong id="highest-day">—</strong></div>
+      <div><span id="average-label">Trung bình/ngày chi</span><strong id="daily-average">0 ₫</strong></div>
+    </div>
+    <div class="category-summary">
+      <h3>Theo danh mục</h3>
+      <div id="category-bars"></div>
+    </div>
+  </dialog>
+
+  <dialog id="category-dialog" class="summary-dialog category-dialog">
+    <button class="icon-button category-dialog-close" type="button" aria-label="Đóng">
+      <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+    </button>
+    <p class="eyebrow">TÙY CHỈNH</p>
+    <h2>Quản lý danh mục</h2>
+    <form id="category-form" class="category-form">
+      <input id="category-name" type="text" maxlength="50" placeholder="Tên danh mục" required>
+      <input id="category-icon" type="text" maxlength="16" placeholder="Emoji" value="✨" aria-label="Biểu tượng">
+      <input id="category-color" type="color" value="#f9bad1" aria-label="Màu danh mục">
+      <button id="save-category" class="btn btn-primary" type="submit">Thêm</button>
+      <button id="cancel-category-edit" class="text-button hidden" type="button">Hủy</button>
+    </form>
+    <div id="category-list" class="category-manager-list"></div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
