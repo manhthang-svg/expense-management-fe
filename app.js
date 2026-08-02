@@ -1,4 +1,4 @@
-const API_BASE = window.EXPENSE_API_URL || 'https://expense-management-api-production.up.railway.app/api';
+const API_BASE = window.EXPENSE_API_URL || 'http://localhost:8080/api';
 
 const state = {
   currentMonth: startOfMonth(new Date()),
@@ -79,7 +79,7 @@ async function loadExpenses() {
   } catch (error) {
     state.expenses = [];
     renderAll();
-    showToast(`${error.message}. Hãy kiểm tra backend tại cổng 8080.`, true);
+    showToast(`${error.message}. Hãy kiểm tra trạng thái backend cloud và cấu hình CORS.`, true);
   } finally {
     state.loading = false;
     $('#calendar-loading').classList.add('hidden');
