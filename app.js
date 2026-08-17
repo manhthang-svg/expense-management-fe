@@ -1,4 +1,6 @@
 const API_BASE = window.EXPENSE_API_URL || 'http://localhost:8080/api';
+const EXPENSE = 'EXPENSE';
+const INCOME = 'INCOME';
 
 const state = {
   currentMonth: startOfMonth(new Date()),
@@ -7,11 +9,14 @@ const state = {
   categories: [],
   editingId: null,
   editingCategoryId: null,
+  categoryFilter: EXPENSE,
   summaryMode: 'month',
+  summaryAnchor: stripTime(new Date()),
+  cashflowChart: null,
   loading: false
 };
 
-const $ = (selector) => document.querySelector(selector);
+const $ = selector => document.querySelector(selector);
 const calendarGrid = $('#calendar-grid');
 const dayPanel = $('#day-panel');
 const backdrop = $('#panel-backdrop');
@@ -23,6 +28,7 @@ function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(
 function endOfMonth(date) { return new Date(date.getFullYear(), date.getMonth() + 1, 0); }
 function addDays(date, days) { return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days); }
 function addMonths(date, months) { return new Date(date.getFullYear(), date.getMonth() + months, 1); }
+function startOfWeek(date) { return addDays(stripTime(date), -((date.getDay() + 6) % 7)); }
 function toISO(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -34,26 +40,37 @@ function parseISO(value) {
   return new Date(year, month - 1, day);
 }
 function sameDay(a, b) { return toISO(a) === toISO(b); }
-function formatMoney(value) { return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value || 0)); }
-function formatCellTotal(value) { return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(Number(value || 0))} ₫`; }
+function formatMoney(value) {
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(Number(value || 0));
+}
 function formatAmountInput(value) {
   const digits = String(value).replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 13);
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 function parseAmount(value) { return Number(String(value).replace(/\D/g, '')); }
 function shortMoney(value) {
-  const amount = Number(value || 0);
+  const amount = Math.abs(Number(value || 0));
+  if (amount >= 1_000_000_000) return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(amount / 1_000_000_000)} tỷ`;
   if (amount >= 1_000_000) return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(amount / 1_000_000)}tr`;
   if (amount >= 1_000) return `${Math.round(amount / 1_000)}k`;
-  return formatMoney(amount);
+  return new Intl.NumberFormat('vi-VN').format(amount);
 }
 function escapeHTML(value) {
   return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
+function itemType(item) { return item.type || EXPENSE; }
+function totalOf(items) { return items.reduce((sum, item) => sum + Number(item.amount), 0); }
+function totalsOf(items) {
+  const income = totalOf(items.filter(item => itemType(item) === INCOME));
+  const expense = totalOf(items.filter(item => itemType(item) === EXPENSE));
+  return { income, expense, balance: income - expense };
+}
+function currentTransactionType() {
+  return form.querySelector('input[name="transactionType"]:checked')?.value || EXPENSE;
+}
 function monthGridRange() {
   const first = startOfMonth(state.currentMonth);
-  const mondayOffset = (first.getDay() + 6) % 7;
-  const start = addDays(first, -mondayOffset);
+  const start = addDays(first, -((first.getDay() + 6) % 7));
   return [start, addDays(start, 41)];
 }
 
@@ -79,7 +96,7 @@ async function loadExpenses() {
   } catch (error) {
     state.expenses = [];
     renderAll();
-    showToast(`${error.message}. Hãy kiểm tra trạng thái backend cloud và cấu hình CORS.`, true);
+    showToast(`${error.message}. Hãy kiểm tra backend tại cổng 8080 và quyền Local network.`, true);
   } finally {
     state.loading = false;
     $('#calendar-loading').classList.add('hidden');
@@ -98,20 +115,24 @@ async function loadCategories() {
   }
 }
 
+function categoriesFor(type) {
+  return state.categories.filter(category => (category.type || EXPENSE) === type);
+}
+
 function renderCategoryOptions(selectedId) {
   const select = $('#category');
-  const current = selectedId || Number(select.value) || state.categories[0]?.id;
-  select.innerHTML = state.categories.length
-    ? state.categories.map(category => `<option value="${category.id}">${escapeHTML(category.icon)} ${escapeHTML(category.name)}</option>`).join('')
-    : '<option value="">Chưa có danh mục</option>';
-  if (current) select.value = String(current);
+  const options = categoriesFor(currentTransactionType());
+  const current = selectedId || (options.some(item => item.id === Number(select.value)) ? Number(select.value) : options[0]?.id);
+  select.innerHTML = options.length
+    ? options.map(category => `<option value="${category.id}">${escapeHTML(category.icon)} ${escapeHTML(category.name)}</option>`).join('')
+    : '<option value="">Chưa có danh mục phù hợp</option>';
+  if (current && options.some(item => item.id === Number(current))) select.value = String(current);
 }
 
 function expensesFor(date) {
   const key = typeof date === 'string' ? date : toISO(date);
   return state.expenses.filter(item => item.expenseDate === key);
 }
-function totalOf(items) { return items.reduce((sum, item) => sum + Number(item.amount), 0); }
 
 function renderAll() {
   renderCalendar();
@@ -125,48 +146,60 @@ function renderCalendar() {
   calendarGrid.innerHTML = Array.from({ length: 42 }, (_, index) => {
     const date = addDays(start, index);
     const items = expensesFor(date);
+    const totals = totalsOf(items);
     const isOutside = date.getMonth() !== state.currentMonth.getMonth();
     const isWeekend = date.getDay() === 0 || date.getDay() === 6;
     const classes = ['calendar-day', isOutside && 'outside', isWeekend && 'day-weekend', sameDay(date, today) && 'today', sameDay(date, state.selectedDate) && 'selected'].filter(Boolean).join(' ');
     const previews = items.slice(0, 2).map(item => `
-      <div class="preview-item"><i class="preview-dot"></i><span class="preview-text">${escapeHTML(item.description)}</span></div>`).join('');
-    return `<button class="${classes}" type="button" data-date="${toISO(date)}" aria-label="Ngày ${date.getDate()}">
+      <div class="preview-item ${itemType(item).toLowerCase()}"><i class="preview-dot"></i><span class="preview-text">${escapeHTML(item.description)}</span></div>`).join('');
+    const cashflow = items.length ? `
+      <span class="cell-cashflow">
+        ${totals.income ? `<b class="cell-income">＋${shortMoney(totals.income)}</b>` : ''}
+        ${totals.expense ? `<b class="cell-expense">−${shortMoney(totals.expense)}</b>` : ''}
+      </span>` : '';
+    return `<button class="${classes}" type="button" data-date="${toISO(date)}" aria-label="Ngày ${date.getDate()}, vào ${formatMoney(totals.income)}, ra ${formatMoney(totals.expense)}">
       <span class="day-number">${date.getDate()}</span>
-      <div class="day-preview">${previews}${items.length > 2 ? `<span class="more-count">+${items.length - 2} khoản khác</span>` : ''}</div>
-      ${items.length ? `<span class="cell-total">${formatCellTotal(totalOf(items))}</span>` : ''}
+      <div class="day-preview">${previews}${items.length > 2 ? `<span class="more-count">+${items.length - 2} giao dịch</span>` : ''}</div>
+      ${cashflow}
     </button>`;
   }).join('');
 }
 
 function renderDayPanel() {
   const items = expensesFor(state.selectedDate);
+  const totals = totalsOf(items);
   const dateLabel = new Intl.DateTimeFormat('vi-VN', { day: 'numeric', month: 'long', year: 'numeric' }).format(state.selectedDate);
   const weekday = new Intl.DateTimeFormat('vi-VN', { weekday: 'long' }).format(state.selectedDate);
   $('#selected-weekday').textContent = sameDay(state.selectedDate, new Date()) ? 'Hôm nay' : weekday;
   $('#selected-date').textContent = dateLabel;
-  $('#day-total').textContent = formatMoney(totalOf(items));
-  $('#day-count').textContent = items.length ? `${items.length} khoản chi · tổng được cập nhật tự động` : 'Chưa có khoản chi';
+  $('#day-balance').textContent = formatMoney(totals.balance);
+  $('#day-balance').classList.toggle('negative', totals.balance < 0);
+  $('#day-income').textContent = formatMoney(totals.income);
+  $('#day-expense').textContent = formatMoney(totals.expense);
+  $('#day-count').textContent = items.length ? `${items.length} giao dịch · tổng được cập nhật tự động` : 'Chưa có giao dịch';
   $('#expense-count-badge').textContent = items.length;
 
   $('#expense-list').innerHTML = items.length ? items.map(item => {
-    const category = item.category || { name: 'Khác', icon: '✨', color: '#F9BAD1' };
-    return `<article class="expense-item">
+    const category = item.category || { name: 'Khác', icon: '•', color: '#F9BAD1' };
+    const type = itemType(item);
+    return `<article class="expense-item ${type.toLowerCase()}">
       <span class="category-icon" style="background:${escapeHTML(category.color)}1f" title="${escapeHTML(category.name)}">${escapeHTML(category.icon)}</span>
-      <div class="expense-info"><strong>${escapeHTML(item.description)}</strong><small>${escapeHTML(category.name)}</small></div>
+      <div class="expense-info"><strong>${escapeHTML(item.description)}</strong><small>${type === INCOME ? 'Tiền vào' : 'Tiền ra'} · ${escapeHTML(category.name)}</small></div>
       <div class="expense-actions">
-        <span class="expense-amount">${formatMoney(item.amount)}</span>
-        <button class="mini-button edit-expense" type="button" data-id="${item.id}" aria-label="Sửa"><svg viewBox="0 0 24 24"><path d="m4 20 4.3-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Zm10-12 3 3"/></svg></button>
-        <button class="mini-button delete delete-expense" type="button" data-id="${item.id}" aria-label="Xóa"><svg viewBox="0 0 24 24"><path d="M4 7h16m-10 4v5m4-5v5M9 7l1-3h4l1 3m3 0-1 13H7L6 7"/></svg></button>
+        <span class="expense-amount">${type === INCOME ? '+' : '−'}${formatMoney(item.amount)}</span>
+        <button class="mini-button edit-expense" type="button" data-id="${item.id}" aria-label="Sửa giao dịch"><svg viewBox="0 0 24 24"><path d="m4 20 4.3-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Zm10-12 3 3"/></svg></button>
+        <button class="mini-button delete delete-expense" type="button" data-id="${item.id}" aria-label="Xóa giao dịch"><svg viewBox="0 0 24 24"><path d="M4 7h16m-10 4v5m4-5v5M9 7l1-3h4l1 3m3 0-1 13H7L6 7"/></svg></button>
       </div>
     </article>`;
-  }).join('') : `<div class="empty-state"><span>🪴</span><p>Ngày này chưa có khoản chi.<br>Thêm khoản đầu tiên ở phía trên.</p></div>`;
+  }).join('') : `<div class="empty-state"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v12H4zM7 7V5h10v2M8 12h8"/></svg><p>Ngày này chưa có giao dịch.<br>Hãy thêm khoản đầu tiên ở phía trên.</p></div>`;
 }
 
 function selectDate(date) {
   const previousMonth = state.currentMonth.getMonth();
+  const previousYear = state.currentMonth.getFullYear();
   state.selectedDate = stripTime(date);
   resetForm();
-  if (date.getMonth() !== previousMonth || date.getFullYear() !== state.currentMonth.getFullYear()) {
+  if (date.getMonth() !== previousMonth || date.getFullYear() !== previousYear) {
     state.currentMonth = startOfMonth(date);
     loadExpenses();
   } else {
@@ -186,12 +219,19 @@ function closePanel() {
   document.body.style.overflow = '';
 }
 
+function setTransactionType(type) {
+  const radio = form.querySelector(`input[name="transactionType"][value="${type}"]`);
+  if (radio) radio.checked = true;
+  form.dataset.type = type;
+}
+
 function resetForm() {
   state.editingId = null;
   form.reset();
-  renderCategoryOptions(state.categories[0]?.id);
-  $('#form-title').textContent = 'Thêm khoản chi';
-  $('#submit-expense span').textContent = 'Lưu khoản chi';
+  setTransactionType(EXPENSE);
+  renderCategoryOptions();
+  $('#form-title').textContent = 'Thêm giao dịch';
+  $('#submit-expense span').textContent = 'Lưu giao dịch';
   $('#cancel-edit').classList.add('hidden');
 }
 
@@ -199,11 +239,13 @@ function beginEdit(id) {
   const item = state.expenses.find(expense => expense.id === id);
   if (!item) return;
   state.editingId = id;
+  const type = itemType(item);
+  setTransactionType(type);
   $('#description').value = item.description;
   $('#amount').value = formatAmountInput(item.amount);
   renderCategoryOptions(item.category?.id);
-  $('#form-title').textContent = 'Chỉnh sửa khoản chi';
-  $('#submit-expense span').textContent = 'Cập nhật khoản chi';
+  $('#form-title').textContent = 'Chỉnh sửa giao dịch';
+  $('#submit-expense span').textContent = 'Cập nhật giao dịch';
   $('#cancel-edit').classList.remove('hidden');
   $('#description').focus();
 }
@@ -212,25 +254,26 @@ async function submitExpense(event) {
   event.preventDefault();
   const description = $('#description').value.trim();
   const amount = parseAmount($('#amount').value);
+  const type = currentTransactionType();
+  const categoryId = Number($('#category').value);
   if (!description || !Number.isFinite(amount) || amount <= 0) {
     showToast('Vui lòng nhập nội dung và số tiền lớn hơn 0.', true);
     return;
   }
-  const categoryId = Number($('#category').value);
   if (!categoryId) {
-    showToast('Vui lòng tạo và chọn một danh mục.', true);
+    showToast(`Vui lòng tạo một danh mục ${type === INCOME ? 'tiền vào' : 'tiền ra'} trước.`, true);
     return;
   }
-  const payload = { description, amount, categoryId, expenseDate: toISO(state.selectedDate) };
+  const payload = { description, amount, type, categoryId, expenseDate: toISO(state.selectedDate) };
   const submitButton = $('#submit-expense');
   submitButton.disabled = true;
   try {
     if (state.editingId) {
       await api(`/expenses/${state.editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
-      showToast('Đã cập nhật khoản chi.');
+      showToast('Đã cập nhật giao dịch.');
     } else {
       await api('/expenses', { method: 'POST', body: JSON.stringify(payload) });
-      showToast('Đã thêm khoản chi mới.');
+      showToast(type === INCOME ? 'Đã thêm khoản tiền vào.' : 'Đã thêm khoản tiền ra.');
     }
     resetForm();
     await loadExpenses();
@@ -243,34 +286,46 @@ async function submitExpense(event) {
 
 async function deleteExpense(id) {
   const item = state.expenses.find(expense => expense.id === id);
-  if (!item || !window.confirm(`Xóa khoản chi “${item.description}”?`)) return;
+  if (!item || !window.confirm(`Xóa giao dịch “${item.description}”?`)) return;
   try {
     await api(`/expenses/${id}`, { method: 'DELETE' });
     if (state.editingId === id) resetForm();
-    showToast('Đã xóa khoản chi.');
+    showToast('Đã xóa giao dịch.');
     await loadExpenses();
   } catch (error) {
     showToast(error.message, true);
   }
 }
 
+function setCategoryFilter(type) {
+  state.categoryFilter = type;
+  document.querySelectorAll('[data-category-filter]').forEach(button => {
+    const active = button.dataset.categoryFilter === type;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  renderCategoryManager();
+}
+
 function renderCategoryManager() {
-  $('#category-list').innerHTML = state.categories.length ? state.categories.map(category => `
+  const categories = categoriesFor(state.categoryFilter);
+  $('#category-list').innerHTML = categories.length ? categories.map(category => `
     <article class="category-manager-item">
       <span class="category-color-icon" style="background:${escapeHTML(category.color)}1f">${escapeHTML(category.icon)}</span>
-      <strong>${escapeHTML(category.name)}</strong>
+      <div class="category-manager-info"><strong>${escapeHTML(category.name)}</strong><small>${category.type === INCOME ? 'Tiền vào' : 'Tiền ra'}</small></div>
       <div class="category-manager-actions">
         <button class="mini-button edit-category" data-id="${category.id}" type="button" aria-label="Sửa danh mục"><svg viewBox="0 0 24 24"><path d="m4 20 4.3-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Zm10-12 3 3"/></svg></button>
         <button class="mini-button delete delete-category" data-id="${category.id}" type="button" aria-label="Xóa danh mục"><svg viewBox="0 0 24 24"><path d="M4 7h16m-10 4v5m4-5v5M9 7l1-3h4l1 3m3 0-1 13H7L6 7"/></svg></button>
       </div>
-    </article>`).join('') : '<div class="empty-state"><p>Chưa có danh mục. Hãy tạo danh mục đầu tiên.</p></div>';
+    </article>`).join('') : '<div class="empty-state"><p>Chưa có danh mục cho loại giao dịch này.</p></div>';
 }
 
 function resetCategoryForm() {
   state.editingCategoryId = null;
   $('#category-form').reset();
+  $('#category-type').value = state.categoryFilter;
   $('#category-icon').value = '✨';
-  $('#category-color').value = '#f9bad1';
+  $('#category-color').value = state.categoryFilter === INCOME ? '#248a70' : '#f9bad1';
   $('#save-category').textContent = 'Thêm';
   $('#cancel-category-edit').classList.add('hidden');
 }
@@ -279,6 +334,7 @@ function beginCategoryEdit(id) {
   const category = state.categories.find(item => item.id === id);
   if (!category) return;
   state.editingCategoryId = id;
+  $('#category-type').value = category.type || EXPENSE;
   $('#category-name').value = category.name;
   $('#category-icon').value = category.icon;
   $('#category-color').value = category.color;
@@ -290,8 +346,9 @@ function beginCategoryEdit(id) {
 async function submitCategory(event) {
   event.preventDefault();
   const payload = {
+    type: $('#category-type').value,
     name: $('#category-name').value.trim(),
-    icon: $('#category-icon').value.trim() || '✨',
+    icon: $('#category-icon').value.trim() || '•',
     color: $('#category-color').value
   };
   if (!payload.name) return;
@@ -303,6 +360,7 @@ async function submitCategory(event) {
       await api('/categories', { method: 'POST', body: JSON.stringify(payload) });
       showToast('Đã thêm danh mục.');
     }
+    setCategoryFilter(payload.type);
     resetCategoryForm();
     await loadCategories();
     await loadExpenses();
@@ -313,7 +371,7 @@ async function submitCategory(event) {
 
 async function deleteCategory(id) {
   const category = state.categories.find(item => item.id === id);
-  if (!category || !window.confirm(`Xóa danh mục “${category.name}”? Các khoản chi cũ vẫn được giữ lại.`)) return;
+  if (!category || !window.confirm(`Xóa danh mục “${category.name}”? Các giao dịch cũ vẫn được giữ lại.`)) return;
   try {
     await api(`/categories/${id}`, { method: 'DELETE' });
     if (state.editingCategoryId === id) resetCategoryForm();
@@ -324,50 +382,183 @@ async function deleteCategory(id) {
   }
 }
 
-function renderSummary(mode = 'month', openDialog = true) {
-  state.summaryMode = mode;
-  const mondayOffset = (state.selectedDate.getDay() + 6) % 7;
-  const rangeStart = mode === 'week' ? addDays(state.selectedDate, -mondayOffset) : startOfMonth(state.currentMonth);
-  const rangeEnd = mode === 'week' ? addDays(rangeStart, 6) : endOfMonth(state.currentMonth);
-  const items = state.expenses.filter(item => {
-    const date = parseISO(item.expenseDate);
-    return date >= rangeStart && date <= rangeEnd;
-  });
-  const monthTotal = totalOf(items);
-  const daily = new Map();
-  const categories = new Map();
-  items.forEach(item => {
-    daily.set(item.expenseDate, (daily.get(item.expenseDate) || 0) + Number(item.amount));
-    const key = item.category?.id || 0;
-    const current = categories.get(key) || { category: item.category || { name: 'Khác', icon: '✨', color: '#F9BAD1' }, amount: 0 };
-    current.amount += Number(item.amount);
-    categories.set(key, current);
-  });
-  const highest = [...daily.entries()].sort((a, b) => b[1] - a[1])[0];
-  $('#summary-month').textContent = mode === 'week'
-    ? `${rangeStart.getDate()}/${rangeStart.getMonth() + 1} – ${rangeEnd.getDate()}/${rangeEnd.getMonth() + 1}/${rangeEnd.getFullYear()}`
-    : new Intl.DateTimeFormat('vi-VN', { month: 'long', year: 'numeric' }).format(state.currentMonth);
-  $('#month-total').textContent = formatMoney(monthTotal);
-  $('#month-count').textContent = `${items.length} khoản chi trong ${mode === 'week' ? 'tuần' : 'tháng'}`;
-  $('#summary-total-label').textContent = `Tổng đã chi trong ${mode === 'week' ? 'tuần' : 'tháng'}`;
-  $('#average-label').textContent = mode === 'week' ? 'Trung bình/ngày' : 'Trung bình/ngày chi';
-  document.querySelectorAll('[data-summary-mode]').forEach(button => {
-    button.classList.toggle('active', button.dataset.summaryMode === mode);
-    button.setAttribute('aria-selected', button.dataset.summaryMode === mode);
-  });
-  $('#summary-day-total').textContent = formatMoney(totalOf(expensesFor(state.selectedDate)));
-  $('#highest-day').textContent = highest ? `${parseISO(highest[0]).getDate()}/${parseISO(highest[0]).getMonth() + 1} · ${shortMoney(highest[1])}` : '—';
-  $('#daily-average').textContent = formatMoney(mode === 'week' ? monthTotal / 7 : (daily.size ? monthTotal / daily.size : 0));
-
-  const sortedCategories = [...categories.values()].sort((a, b) => b.amount - a.amount);
-  $('#category-bars').innerHTML = sortedCategories.length ? sortedCategories.map(({ category, amount }) => {
-    const percent = monthTotal ? (amount / monthTotal) * 100 : 0;
-    return `<div class="category-row"><span>${escapeHTML(category.icon)} ${escapeHTML(category.name)}</span><div class="bar-track"><div class="bar-fill" style="width:${percent}%;background:${escapeHTML(category.color)}"></div></div><strong>${shortMoney(amount)}</strong></div>`;
-  }).join('') : `<div class="empty-state"><p>Chưa có dữ liệu trong ${mode === 'week' ? 'tuần' : 'tháng'} này.</p></div>`;
-  if (openDialog && !$('#summary-dialog').open) $('#summary-dialog').showModal();
+function summaryRange() {
+  if (state.summaryMode === 'week') {
+    const start = startOfWeek(state.summaryAnchor);
+    return [start, addDays(start, 6)];
+  }
+  if (state.summaryMode === 'year') {
+    return [new Date(state.summaryAnchor.getFullYear(), 0, 1), new Date(state.summaryAnchor.getFullYear(), 11, 31)];
+  }
+  return [startOfMonth(state.summaryAnchor), endOfMonth(state.summaryAnchor)];
 }
 
-function openSummary() { renderSummary(state.summaryMode, true); }
+function summaryPeriodLabel(start, end) {
+  if (state.summaryMode === 'week') {
+    return `${start.getDate()}/${start.getMonth() + 1}/${start.getFullYear()} – ${end.getDate()}/${end.getMonth() + 1}/${end.getFullYear()}`;
+  }
+  if (state.summaryMode === 'year') return `Năm ${start.getFullYear()}`;
+  return new Intl.DateTimeFormat('vi-VN', { month: 'long', year: 'numeric' }).format(start);
+}
+
+function buildChartSeries(items, start, end) {
+  let buckets;
+  if (state.summaryMode === 'week') {
+    buckets = Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(start, index);
+      return { key: toISO(date), label: new Intl.DateTimeFormat('vi-VN', { weekday: 'short' }).format(date), income: 0, expense: 0 };
+    });
+  } else if (state.summaryMode === 'year') {
+    buckets = Array.from({ length: 12 }, (_, index) => ({
+      key: index,
+      label: `T${index + 1}`,
+      income: 0,
+      expense: 0
+    }));
+  } else {
+    const days = end.getDate();
+    buckets = Array.from({ length: Math.ceil(days / 7) }, (_, index) => {
+      const from = index * 7 + 1;
+      const to = Math.min(from + 6, days);
+      return { key: index, label: `${from}–${to}`, income: 0, expense: 0 };
+    });
+  }
+
+  items.forEach(item => {
+    const date = parseISO(item.expenseDate);
+    const key = state.summaryMode === 'week'
+      ? item.expenseDate
+      : state.summaryMode === 'year'
+        ? date.getMonth()
+        : Math.floor((date.getDate() - 1) / 7);
+    const bucket = buckets.find(entry => entry.key === key);
+    if (bucket) bucket[itemType(item) === INCOME ? 'income' : 'expense'] += Number(item.amount);
+  });
+  return buckets;
+}
+
+function renderChart(buckets) {
+  if (state.cashflowChart) {
+    state.cashflowChart.destroy();
+    state.cashflowChart = null;
+  }
+  const wrap = $('.chart-wrap');
+  const fallback = $('#chart-fallback');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const chartSummary = buckets.map(bucket => `${bucket.label}: vào ${formatMoney(bucket.income)}, ra ${formatMoney(bucket.expense)}`).join('; ');
+  $('#cashflow-chart').setAttribute('aria-label', `Biểu đồ dòng tiền. ${chartSummary}`);
+
+  if (window.Chart) {
+    wrap.classList.remove('hidden');
+    fallback.classList.add('hidden');
+    state.cashflowChart = new window.Chart($('#cashflow-chart'), {
+      type: 'bar',
+      data: {
+        labels: buckets.map(bucket => bucket.label),
+        datasets: [
+          { label: 'Tiền vào', data: buckets.map(bucket => bucket.income), backgroundColor: '#248A70', borderRadius: 6, maxBarThickness: 34 },
+          { label: 'Tiền ra', data: buckets.map(bucket => bucket.expense), backgroundColor: '#C94F7C', borderRadius: 6, maxBarThickness: 34 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: reducedMotion ? false : { duration: 280 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: context => `${context.dataset.label}: ${formatMoney(context.raw)}` } }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#6E7B73', maxRotation: 0 } },
+          y: { beginAtZero: true, grid: { color: '#F2E7EB' }, ticks: { color: '#6E7B73', callback: value => shortMoney(value) } }
+        }
+      }
+    });
+    return;
+  }
+
+  wrap.classList.add('hidden');
+  fallback.classList.remove('hidden');
+  fallback.innerHTML = buckets.map(bucket => `
+    <div class="fallback-row"><strong>${escapeHTML(bucket.label)}</strong><span class="fallback-income">Vào ${shortMoney(bucket.income)}</span><span class="fallback-expense">Ra ${shortMoney(bucket.expense)}</span></div>
+  `).join('');
+}
+
+function renderSummary(items, start, end) {
+  const incomeItems = items.filter(item => itemType(item) === INCOME);
+  const expenseItems = items.filter(item => itemType(item) === EXPENSE);
+  const totals = totalsOf(items);
+  $('#summary-period').textContent = summaryPeriodLabel(start, end);
+  $('#summary-income').textContent = formatMoney(totals.income);
+  $('#summary-expense').textContent = formatMoney(totals.expense);
+  $('#summary-balance').textContent = formatMoney(totals.balance);
+  $('#summary-balance').classList.toggle('negative', totals.balance < 0);
+  $('#income-count').textContent = `${incomeItems.length} giao dịch`;
+  $('#expense-count').textContent = `${expenseItems.length} giao dịch`;
+  $('#balance-note').textContent = totals.balance >= 0 ? 'Thu đang cao hơn chi' : 'Chi đang cao hơn thu';
+
+  document.querySelectorAll('[data-summary-mode]').forEach(button => {
+    const active = button.dataset.summaryMode === state.summaryMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+
+  const buckets = buildChartSeries(items, start, end);
+  renderChart(buckets);
+  $('#chart-description').textContent = state.summaryMode === 'week'
+    ? 'Theo từng ngày trong tuần'
+    : state.summaryMode === 'month'
+      ? 'Theo từng nhóm 7 ngày trong tháng'
+      : 'Theo từng tháng trong năm';
+
+  const categories = new Map();
+  expenseItems.forEach(item => {
+    const category = item.category || { id: 0, name: 'Khác', icon: '•', color: '#C94F7C' };
+    const current = categories.get(category.id) || { category, amount: 0 };
+    current.amount += Number(item.amount);
+    categories.set(category.id, current);
+  });
+  const sortedCategories = [...categories.values()].sort((a, b) => b.amount - a.amount);
+  $('#top-category').textContent = sortedCategories[0] ? `${sortedCategories[0].category.name} · ${shortMoney(sortedCategories[0].amount)}` : '—';
+  $('#category-bars').innerHTML = sortedCategories.length ? sortedCategories.map(({ category, amount }) => {
+    const percent = totals.expense ? (amount / totals.expense) * 100 : 0;
+    return `<div class="category-row">
+      <span title="${escapeHTML(category.name)}">${escapeHTML(category.icon)} ${escapeHTML(category.name)}</span>
+      <div class="bar-track" role="img" aria-label="${escapeHTML(category.name)}: ${formatMoney(amount)}, ${Math.round(percent)} phần trăm"><div class="bar-fill" style="width:${percent}%;background:${escapeHTML(category.color)}"></div></div>
+      <strong>${shortMoney(amount)}</strong>
+    </div>`;
+  }).join('') : '<div class="empty-state"><p>Chưa có tiền ra trong kỳ này.</p></div>';
+}
+
+async function loadSummary(openDialog = false) {
+  const dialog = $('#summary-dialog');
+  if (openDialog && !dialog.open) dialog.showModal();
+  const [start, end] = summaryRange();
+  $('#summary-loading').classList.remove('hidden');
+  $('#summary-content').classList.add('summary-dimmed');
+  try {
+    const items = await api(`/expenses?startDate=${toISO(start)}&endDate=${toISO(end)}`) || [];
+    renderSummary(items, start, end);
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    $('#summary-loading').classList.add('hidden');
+    $('#summary-content').classList.remove('summary-dimmed');
+  }
+}
+
+function openSummary() {
+  state.summaryAnchor = stripTime(state.selectedDate);
+  loadSummary(true);
+}
+
+function shiftSummaryPeriod(offset) {
+  if (state.summaryMode === 'week') state.summaryAnchor = addDays(state.summaryAnchor, offset * 7);
+  else if (state.summaryMode === 'year') state.summaryAnchor = new Date(state.summaryAnchor.getFullYear() + offset, 0, 1);
+  else state.summaryAnchor = addMonths(state.summaryAnchor, offset);
+  loadSummary(false);
+}
 
 function navigateMonth(offset) {
   state.currentMonth = addMonths(state.currentMonth, offset);
@@ -396,9 +587,13 @@ $('#expense-list').addEventListener('click', event => {
   if (remove) deleteExpense(Number(remove.dataset.id));
 });
 form.addEventListener('submit', submitExpense);
-$('#amount').addEventListener('input', event => {
-  event.target.value = formatAmountInput(event.target.value);
+form.querySelectorAll('input[name="transactionType"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    form.dataset.type = currentTransactionType();
+    renderCategoryOptions();
+  });
 });
+$('#amount').addEventListener('input', event => { event.target.value = formatAmountInput(event.target.value); });
 $('#cancel-edit').addEventListener('click', resetForm);
 $('.previous-month').addEventListener('click', () => navigateMonth(-1));
 $('.next-month').addEventListener('click', () => navigateMonth(1));
@@ -410,17 +605,28 @@ $('.today-button').addEventListener('click', () => {
 });
 $('.summary-button').addEventListener('click', openSummary);
 document.querySelectorAll('[data-summary-mode]').forEach(button => {
-  button.addEventListener('click', () => renderSummary(button.dataset.summaryMode, false));
+  button.addEventListener('click', () => {
+    state.summaryMode = button.dataset.summaryMode;
+    loadSummary(false);
+  });
 });
+$('#previous-period').addEventListener('click', () => shiftSummaryPeriod(-1));
+$('#next-period').addEventListener('click', () => shiftSummaryPeriod(1));
 $('.dialog-close').addEventListener('click', () => $('#summary-dialog').close());
 $('#manage-categories').addEventListener('click', () => {
+  setCategoryFilter(currentTransactionType());
   resetCategoryForm();
-  renderCategoryManager();
   $('#category-dialog').showModal();
 });
 $('.category-dialog-close').addEventListener('click', () => $('#category-dialog').close());
 $('#category-form').addEventListener('submit', submitCategory);
 $('#cancel-category-edit').addEventListener('click', resetCategoryForm);
+document.querySelectorAll('[data-category-filter]').forEach(button => {
+  button.addEventListener('click', () => {
+    setCategoryFilter(button.dataset.categoryFilter);
+    resetCategoryForm();
+  });
+});
 $('#category-list').addEventListener('click', event => {
   const edit = event.target.closest('.edit-category');
   const remove = event.target.closest('.delete-category');
@@ -429,12 +635,10 @@ $('#category-list').addEventListener('click', event => {
 });
 $('.close-panel').addEventListener('click', closePanel);
 backdrop.addEventListener('click', closePanel);
-$('#summary-dialog').addEventListener('click', event => {
-  if (event.target === $('#summary-dialog')) $('#summary-dialog').close();
-});
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && dayPanel.classList.contains('open')) closePanel();
 });
 
+setTransactionType(EXPENSE);
 renderAll();
 loadCategories().then(loadExpenses);
