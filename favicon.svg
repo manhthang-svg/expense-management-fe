@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img">
+  <title>Ví Lịch</title>
+  <rect width="64" height="64" rx="16" fill="#F9BAD1"/>
+  <rect x="10" y="12" width="44" height="42" rx="9" fill="#762B49"/>
+  <rect x="14" y="23" width="36" height="27" rx="5" fill="#FFF8FB"/>
+  <rect x="18" y="8" width="6" height="14" rx="3" fill="#762B49"/>
+  <rect x="40" y="8" width="6" height="14" rx="3" fill="#762B49"/>
+  <circle cx="38" cy="37" r="9" fill="#F9BAD1"/>
+  <path d="M35 32.5v9M35 34.5h3.5a3.5 3.5 0 0 1 0 7H35M33 38h10" fill="none" stroke="#762B49" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
