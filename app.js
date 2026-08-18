@@ -13,6 +13,7 @@ const state = {
   summaryMode: 'month',
   summaryAnchor: stripTime(new Date()),
   cashflowChart: null,
+  cumulativeChart: null,
   loading: false
 };
 
@@ -485,6 +486,145 @@ function renderChart(buckets) {
   `).join('');
 }
 
+function buildCumulativePoints(items) {
+  const orderedItems = [...items].sort((first, second) => {
+    const dateOrder = first.expenseDate.localeCompare(second.expenseDate);
+    if (dateOrder) return dateOrder;
+    const createdOrder = String(first.createdAt || '').localeCompare(String(second.createdAt || ''));
+    return createdOrder || Number(first.id) - Number(second.id);
+  });
+  let cumulative = 0;
+  const points = [{
+    label: 'Bắt đầu',
+    dateLabel: 'Bắt đầu kỳ',
+    description: 'Mốc bắt đầu',
+    delta: 0,
+    value: 0,
+    type: null
+  }];
+
+  orderedItems.forEach(item => {
+    const type = itemType(item);
+    const delta = (type === INCOME ? 1 : -1) * Number(item.amount);
+    cumulative += delta;
+    const date = parseISO(item.expenseDate);
+    points.push({
+      label: `${date.getDate()}/${date.getMonth() + 1}`,
+      dateLabel: new Intl.DateTimeFormat('vi-VN', { day: 'numeric', month: 'long', year: 'numeric' }).format(date),
+      description: item.description,
+      delta,
+      value: cumulative,
+      type
+    });
+  });
+  return points;
+}
+
+function renderCumulativeChart(items) {
+  if (state.cumulativeChart) {
+    state.cumulativeChart.destroy();
+    state.cumulativeChart = null;
+  }
+  const points = buildCumulativePoints(items);
+  const values = points.map(point => point.value);
+  const finalValue = values.at(-1) || 0;
+  const highValue = Math.max(...values);
+  const lowValue = Math.min(...values);
+  const largestDrop = points
+    .filter(point => point.delta < 0)
+    .sort((first, second) => first.delta - second.delta)[0];
+
+  $('#cumulative-final').textContent = formatMoney(finalValue);
+  $('#cumulative-final').classList.toggle('negative', finalValue < 0);
+  $('#cumulative-high').textContent = formatMoney(highValue);
+  $('#cumulative-low').textContent = formatMoney(lowValue);
+  $('#cumulative-low').classList.toggle('negative', lowValue < 0);
+  $('#largest-drop').textContent = largestDrop ? `−${shortMoney(Math.abs(largestDrop.delta))}` : '—';
+  $('#largest-drop').title = largestDrop ? `${largestDrop.description} · ${largestDrop.dateLabel}` : '';
+
+  const accessibleSummary = `Dòng tiền lũy kế bắt đầu từ 0 đồng, kết thúc ${formatMoney(finalValue)}, cao nhất ${formatMoney(highValue)}, thấp nhất ${formatMoney(lowValue)}.`;
+  $('#cumulative-chart').setAttribute('aria-label', accessibleSummary);
+  const wrap = $('.cumulative-chart-wrap');
+  const fallback = $('#cumulative-fallback');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (window.Chart) {
+    wrap.classList.remove('hidden');
+    fallback.classList.add('hidden');
+    state.cumulativeChart = new window.Chart($('#cumulative-chart'), {
+      type: 'line',
+      data: {
+        labels: points.map(point => point.label),
+        datasets: [{
+          label: 'Dòng tiền lũy kế',
+          data: values,
+          borderColor: '#248A70',
+          borderWidth: 2.5,
+          stepped: 'after',
+          tension: 0,
+          fill: false,
+          pointRadius: points.length > 60 ? 1.5 : 3,
+          pointHoverRadius: 5,
+          pointBorderWidth: 2,
+          pointBorderColor: '#FFFFFF',
+          pointBackgroundColor: points.map(point => point.delta < 0 ? '#C94F7C' : point.delta > 0 ? '#248A70' : '#7B8790'),
+          segment: {
+            borderColor: context => points[context.p1DataIndex]?.delta < 0 ? '#C94F7C' : '#248A70'
+          }
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        normalized: true,
+        animation: reducedMotion ? false : { duration: 300 },
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: contexts => {
+                const point = points[contexts[0]?.dataIndex];
+                return point ? `${point.dateLabel} · ${point.description}` : '';
+              },
+              label: context => `Lũy kế: ${formatMoney(context.raw)}`,
+              afterLabel: context => {
+                const point = points[context.dataIndex];
+                if (!point?.delta) return 'Mốc 0 ₫';
+                return `${point.type === INCOME ? 'Tiền vào' : 'Tiền ra'}: ${point.delta > 0 ? '+' : '−'}${formatMoney(Math.abs(point.delta))}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { color: '#6E7B73', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }
+          },
+          y: {
+            grid: {
+              color: context => Number(context.tick.value) === 0 ? '#9B657A' : '#F2E7EB',
+              lineWidth: context => Number(context.tick.value) === 0 ? 1.5 : 1
+            },
+            ticks: { color: '#6E7B73', callback: value => shortMoney(value) }
+          }
+        }
+      }
+    });
+    return;
+  }
+
+  wrap.classList.add('hidden');
+  fallback.classList.remove('hidden');
+  fallback.innerHTML = points.map(point => `
+    <div class="cumulative-fallback-row">
+      <strong>${escapeHTML(point.label)}</strong>
+      <span>${escapeHTML(point.description)}</span>
+      <b class="${point.delta < 0 ? 'fallback-expense' : 'fallback-income'}">${formatMoney(point.value)}</b>
+    </div>
+  `).join('');
+}
+
 function renderSummary(items, start, end) {
   const incomeItems = items.filter(item => itemType(item) === INCOME);
   const expenseItems = items.filter(item => itemType(item) === EXPENSE);
@@ -506,6 +646,7 @@ function renderSummary(items, start, end) {
 
   const buckets = buildChartSeries(items, start, end);
   renderChart(buckets);
+  renderCumulativeChart(items);
   $('#chart-description').textContent = state.summaryMode === 'week'
     ? 'Theo từng ngày trong tuần'
     : state.summaryMode === 'month'

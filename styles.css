@@ -184,6 +184,17 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .fallback-row { display: grid; grid-template-columns: 50px 1fr 1fr; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--soft); font-size: 11px; }
 .fallback-income { color: #17634f; }
 .fallback-expense { color: #8f294f; }
+.chart-basis { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 99px; padding: 5px 9px; color: var(--muted); background: var(--soft); font-size: 10px; font-weight: 700; }
+.cumulative-chart-card { background: linear-gradient(180deg, #fff 0%, #fffbfc 100%); }
+.cumulative-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.cumulative-kpis > div { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.cumulative-kpis span { display: block; color: var(--muted); font-size: 9px; }
+.cumulative-kpis strong { display: block; margin-top: 4px; overflow: hidden; color: #17634f; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cumulative-kpis strong.negative, #largest-drop { color: #8f294f; }
+.cumulative-chart-wrap { height: 280px; }
+.cumulative-fallback-row { display: grid; grid-template-columns: 54px minmax(0, 1fr) 90px; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 8px; background: var(--soft); font-size: 10px; }
+.cumulative-fallback-row > span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.cumulative-fallback-row > b { text-align: right; }
 .summary-hero { border-radius: 17px; padding: 20px; color: #592238; background: linear-gradient(135deg, #f9bad1, #f3a2c0); }
 .summary-hero span, .summary-hero small { display: block; color: rgba(89,34,56,.7); font-size: 12px; }
 .summary-hero strong { display: block; margin: 5px 0; font-size: 34px; letter-spacing: -.04em; }
@@ -266,6 +277,8 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
   .cashflow-cards { grid-template-columns: 1fr; }
   .cashflow-card strong { font-size: 20px; }
   .chart-wrap { height: 220px; }
+  .cumulative-chart-wrap { height: 245px; }
+  .cumulative-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .chart-heading { align-items: flex-start; }
   .chart-legend { display: none; }
   .category-form { grid-template-columns: 1fr 56px 45px; }

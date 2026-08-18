@@ -124,6 +124,25 @@
         <div class="chart-wrap"><canvas id="cashflow-chart" role="img" aria-label="Biểu đồ so sánh tiền vào và tiền ra"></canvas></div>
         <div id="chart-fallback" class="chart-fallback hidden"></div>
       </section>
+      <section class="chart-card cumulative-chart-card" aria-labelledby="cumulative-chart-title">
+        <div class="chart-heading">
+          <div>
+            <h3 id="cumulative-chart-title">Dòng tiền lũy kế</h3>
+            <p>Tiền vào kéo đường đi lên, tiền ra kéo đường đi xuống</p>
+          </div>
+          <span class="chart-basis">Bắt đầu từ 0 ₫</span>
+        </div>
+        <div class="cumulative-kpis" aria-label="Tóm tắt dòng tiền lũy kế">
+          <div><span>Cuối kỳ</span><strong id="cumulative-final">0 ₫</strong></div>
+          <div><span>Cao nhất</span><strong id="cumulative-high">0 ₫</strong></div>
+          <div><span>Thấp nhất</span><strong id="cumulative-low">0 ₫</strong></div>
+          <div><span>Giảm mạnh nhất</span><strong id="largest-drop">—</strong></div>
+        </div>
+        <div class="chart-wrap cumulative-chart-wrap">
+          <canvas id="cumulative-chart" role="img" aria-label="Biểu đồ đường dòng tiền lũy kế"></canvas>
+        </div>
+        <div id="cumulative-fallback" class="chart-fallback hidden"></div>
+      </section>
       <section class="category-summary">
         <div class="chart-heading"><div><h3>Tiền ra theo danh mục</h3><p>Danh mục chiếm nhiều ngân sách nhất</p></div><strong id="top-category">—</strong></div>
         <div id="category-bars"></div>
